@@ -120,6 +120,8 @@ details ul,details ol{margin:10px 0 0;padding-left:20px;display:flex;flex-direct
 .scheme{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .scheme span{font-size:13px;border-radius:999px;padding:3px 10px;background:var(--accent-soft)}
 
+.reset{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:7px 16px;font-size:14px;font-weight:600}
+.reset.armed{border-color:var(--bad);color:var(--bad);background:var(--bad-soft)}
 .goal{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .goal b{font-family:var(--display);font-size:26px}
 .goal .bar{height:5px;border-radius:3px;background:var(--line);margin-top:4px;overflow:hidden}
@@ -169,6 +171,9 @@ footer a{color:var(--accent)}
   <section class="card">
     <div class="done" style="margin-bottom:6px"><span id="doneTxt">Pflicht</span><div class="progress"><i id="bar"></i></div><span class="pill" id="pill">0/0</span></div>
     <div class="list" id="must"></div>
+  </section>
+  <section style="display:flex;justify-content:center" id="resetWrap">
+    <button class="reset" id="reset">Tag zurücksetzen</button>
   </section>
 
   <section class="card" id="bonusCard">
@@ -299,7 +304,7 @@ function save(date){
 }
 async function flush(){
   const batch=Object.assign({},pending);for(const k in pending)delete pending[k];
-  if(store){for(const k in batch){try{await store.doc('tage/'+k).set(batch[k])}catch(e){setSync('Speichern fehlgeschlagen, bitte nochmal tippen',true)}}}
+  if(store){for(const k in batch){try{if(batch[k]===null)await store.doc('tage/'+k).delete();else await store.doc('tage/'+k).set(batch[k])}catch(e){setSync('Speichern fehlgeschlagen, bitte nochmal tippen',true)}}}
   else{try{localStorage.setItem('schicht-days',JSON.stringify(days))}catch(e){}}
 }
 async function saveSettings(){
@@ -321,6 +326,7 @@ function render(){
   $('dSub').textContent=fmt(view,{weekday:'short',day:'numeric',month:'long'});
   $('next').disabled=rel>=1;
   $('streak').textContent=streak();
+  $('resetWrap').hidden=!days[view];
 
   const strip=$('strip');strip.innerHTML='';
   for(let i=13;i>=0;i--){
@@ -341,14 +347,14 @@ function render(){
     const b=document.createElement('button');b.className='type';b.style.setProperty('--c','var('+v.c+')');
     b.setAttribute('aria-pressed',d.typ===k);
     b.innerHTML='<b>'+v.name+'</b><small>'+v.sub+'</small>'+(d._new&&d.typ===k?'<span class="tag">Vorschlag</span>':'');
-    b.onclick=()=>mutate(c=>{c.typ=k});ty.appendChild(b);
+    b.onclick=()=>mutate(c=>{c.typ=(c.typ===k&&!c._new)?null:k});ty.appendChild(b);
   });
 
   const tw=$('trains');tw.innerHTML='';
   TRAINS.forEach(([k,l,s])=>{
     const b=document.createElement('button');b.className='chip'+(isKraft(k)?' kraft':'');b.setAttribute('aria-pressed',d.training===k);
     b.innerHTML=l+'<span class="s">'+s+'</span>';
-    b.onclick=()=>mutate(c=>{if(c.training!==k){c.training=k;c.checks.training=false}});tw.appendChild(b);
+    b.onclick=()=>mutate(c=>{if(c.training!==k){c.training=k}else{c.training=null}c.checks.training=false});tw.appendChild(b);
   });
   const lu=lastUnit(view);
   $('sugg').textContent=lu?'zuletzt '+lu+', dran wäre '+SPLIT[(SPLIT.indexOf(lu)+1)%4]:'';
@@ -426,6 +432,14 @@ function goals(){
   $('gCronBar').style.width=Math.min(100,c/14*100)+'%';$('gUnitsBar').style.width=Math.min(100,u/8*100)+'%';
 }
 
+let armT=null;
+function resetDay(){
+  const b=$('reset');
+  if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Wirklich alles für diesen Tag löschen?';clearTimeout(armT);armT=setTimeout(()=>{b.classList.remove('armed');b.textContent='Tag zurücksetzen'},4000);return}
+  clearTimeout(armT);b.classList.remove('armed');b.textContent='Tag zurücksetzen';
+  delete days[view];pending[view]=null;clearTimeout(timer);timer=setTimeout(flush,50);render();
+}
+$('reset').onclick=resetDay;
 $('prev').onclick=()=>{view=add(view,-1);render()};
 $('next').onclick=()=>{if(diff(view,todayISO())<1){view=add(view,1);render()}};
 $('defizit').onchange=e=>{settings.defizit=e.target.checked;saveSettings();if(days[view])mutate(c=>{c.defizit=e.target.checked});else render()};
@@ -442,7 +456,7 @@ render();
   store=db;
   db.collection('tage').onSnapshot(snap=>{
     const next={};snap.docs.forEach(doc=>{if(doc.exists)next[doc.id]=doc.data()});
-    for(const k in pending)next[k]=pending[k];
+    for(const k in pending){if(pending[k]===null)delete next[k];else next[k]=pending[k]}
     days=next;setSync('Gespeichert, auf allen Geräten gleich');render();
   },()=>setSync('Verbindung verloren, bitte Seite neu laden',true));
   db.doc('einstellungen/app').onSnapshot(s=>{if(s.exists){settings=Object.assign({woche:1,defizit:true},s.data());render()}},()=>{});
